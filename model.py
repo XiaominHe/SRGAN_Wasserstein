@@ -4,14 +4,88 @@
 import tensorflow as tf
 import tensorlayer as tl
 from tensorlayer.layers import *
+from tf_dcsrn.layers import conv3d
+
 # from tensorflow.python.ops import variable_scope as vs
 # from tensorflow.python.ops import math_ops, init_ops, array_ops, nn
 # from tensorflow.python.util import nest
 # from tensorflow.contrib.rnn.python.ops import core_rnn_cell
 
 # https://github.com/david-gpu/srez/blob/master/srez_model.py
+# ---------------------------------------------------------------
+def SRGAN_g(t_image, channels = 1, block_num = 4, block_units_num = 4, growth_rate = 16, filter_size = 3,is_train = False):
+	x = t_image
+	weights = [];
+	for block in range(0,block_num):
+		if block == 0:
+			initial_output, block_output, w = denseblock(x,channels=channels, initial_block=True,
+								    layers=block_units_num, growth_rate=growth_rate, 
+								     filter_size=filter_size)
+			in_node= initial_output;
+			weights.append(w)
+			
+		else:
+			in_features_num = 2*growth_rate + (2+block_units_num)*growth_rate*block
+			block_output, w = denseblock(in_node, channels = in_features_num, initial_block=False,
+						    layers=block_units_num, growth_rate=growth_rate, 
+						    filter_size=filter_size)
+			weights.append(w)
+			
+		# -------- Concatenate  ----------
+		in_node = tf.concat([in_node,block_output],4);
+		
+		# -------- Reconstruction ---------
+		if block == block_number -1:
+			in_features_num = 2*growth_rate + (2+block_units_num)*growth_rate*block_num
+			stddev = np.sqrt(2 / (filter_size**3 * growth_rate))
+			w_re = tf.truncated_normal([filter_size,filter_size,filter_size,in_features,channels], stddev=stddev)
+			Figure_Generated = conv3d(in_node,w_re)
+			weights.append(w_re)
+			
+	return Figure_Generated, weights
 
-def SRGAN_g(t_image, is_train=False, reuse=False):
+def denseblock(x, channels, initial_block = False, layers = 4, growth_rate = 16, filter_size = 3):
+	
+	stddev = np.sqrt(2 / (filter_size**3 * growth_rate));
+	in_node = x
+	
+	# -------- 2K Conv or Compressor---------
+	w0 = tf.truncated_normal([filter_size,filter_size,filter_size,channels,2*growth_rate], stddev=stddev)
+	in_node = Conv3d(in_node,w0)
+	if initial_block:
+		initial_output = in_node
+		
+	# -------- Block Layers---------
+	weights = []
+	
+	for layer in range(0,layers):
+		in_features_num = (2+layer) * growth_rate
+		w1 = tf.truncated_normal([filter_size,filter_size,filter_size,in_features_num,growth_rate], stddev=stddev)
+		# Concat Results to adjust layer input
+		if layer~=0:
+			in_node = tf.concat([in_node,output],4)
+		# Batch Normalization
+		# 改动：
+		# 1. 官网上说建议把decay设的比较大，不是0 
+		# 2. 官网上说在training过程，moving_mean和moving_variance需要被更新，应在train中涉及
+		bn = tf.contrib.layers.batch_norm(in_node,is_training=is_train) 
+		# ELU 
+		elu = tf.nn.elu(bn)
+		# 3D conv 
+		output = conv3d(elu,w1)
+		
+		weights.append(w1)
+		
+	# -------- Report Results ---------
+	if initial_block:
+		return initial_output, output, weights
+	else:
+		return output, weights
+	
+
+		
+# ---------------------------------------------------------------
+def SRGAN_g2(t_image, is_train=False, reuse=False):
     """ Generator in Photo-Realistic Single Image Super-Resolution Using a Generative Adversarial Network
     feature maps (n) and stride (s) feature maps (n) and stride (s)
     """
@@ -54,7 +128,7 @@ def SRGAN_g(t_image, is_train=False, reuse=False):
         return n
 
 
-def SRGAN_g2(t_image, is_train=False, reuse=False):
+def SRGAN_g3(t_image, is_train=False, reuse=False):
     """ Generator in Photo-Realistic Single Image Super-Resolution Using a Generative Adversarial Network
     feature maps (n) and stride (s) feature maps (n) and stride (s)
 
